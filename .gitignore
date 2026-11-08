@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+*.png
+!hero.png
+!kerr_grrt_telemetry.png

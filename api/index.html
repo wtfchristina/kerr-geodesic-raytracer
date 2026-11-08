@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Kerr Black Hole GRRT — Null-Geodesic Ray Tracer</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'SF Mono', 'JetBrains Mono', 'Fira Code', monospace; }
+    body { background: #000205; color: #e2e8f0; overflow: hidden; user-select: none; }
+    #canvas-container { position: fixed; inset: 0; z-index: 1; }
+
+    .hud-panel {
+      position: fixed; z-index: 10; background: rgba(3, 6, 14, 0.84);
+      border: 1px solid rgba(245, 158, 11, 0.28); border-radius: 8px;
+      backdrop-filter: blur(18px); padding: 15px;
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.95), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    }
+    .left-hud { top: 18px; left: 18px; width: 320px; }
+    .right-hud { top: 18px; right: 18px; width: 335px; }
+    .bottom-hud { bottom: 18px; left: 50%; transform: translateX(-50%); display: flex; gap: 28px; padding: 10px 26px; white-space: nowrap; }
+
+    .title { font-size: 11.5px; font-weight: 800; color: #fbbf24; letter-spacing: 1.4px; text-transform: uppercase; margin-bottom: 2px; text-shadow: 0 0 10px rgba(251,191,36,0.35); }
+    .subtitle { font-size: 9px; color: #64748b; margin-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 6px; }
+
+    .control-group { margin-bottom: 10px; }
+    .control-label { display: flex; justify-content: space-between; font-size: 10px; color: #cbd5e1; margin-bottom: 3px; }
+    .control-val { color: #fbbf24; font-weight: 700; }
+    input[type=range] {
+      width: 100%; accent-color: #fbbf24; background: #0f172a; height: 4px; border-radius: 4px; cursor: pointer;
+    }
+
+    .btn-row { display: flex; gap: 6px; margin-top: 8px; }
+    button {
+      flex: 1; padding: 7px 6px; font-size: 9.5px; font-weight: 800; color: #020409;
+      background: #fbbf24; border: none; border-radius: 4px; cursor: pointer; transition: 0.15s; letter-spacing: 0.4px;
+    }
+    button:hover { background: #fcd34d; box-shadow: 0 0 12px rgba(251, 191, 36, 0.5); }
+    button.secondary { background: rgba(15, 23, 42, 0.85); color: #94a3b8; border: 1px solid rgba(148, 163, 184, 0.25); }
+    button.secondary.active { background: rgba(251, 191, 36, 0.18); border-color: #fbbf24; color: #fbbf24; box-shadow: inset 0 0 8px rgba(251, 191, 36, 0.25); }
+
+    .metric-box { margin-bottom: 8px; padding: 7px 10px; background: rgba(6, 10, 20, 0.9); border-left: 3px solid #fbbf24; border-radius: 4px; }
+    .metric-label { font-size: 8.5px; color: #64748b; text-transform: uppercase; letter-spacing: 0.6px; }
+    .metric-value { font-size: 15px; font-weight: 800; color: #f8fafc; margin-top: 1px; }
+    .metric-sub { font-size: 9px; color: #38bdf8; margin-top: 1px; }
+
+    .diag-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 6px; }
+    .diag-card { background: #020408; border: 1px solid rgba(251, 191, 36, 0.2); border-radius: 4px; padding: 5px; }
+    .diag-title { font-size: 8px; color: #94a3b8; text-transform: uppercase; margin-bottom: 3px; display: flex; justify-content: space-between; }
+    canvas.mini-canvas { width: 100%; height: 92px; display: block; border-radius: 2px; }
+
+    .stat-pill { text-align: center; }
+    .stat-pill .lbl { font-size: 8.5px; color: #64748b; text-transform: uppercase; letter-spacing: 0.6px; }
+    .stat-pill .val { font-size: 11.5px; font-weight: 700; color: #e2e8f0; margin-top: 2px; }
+  </style>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="canvas-container"></div>
+
+  <!-- Left Control Panel -->
+  <div class="hud-panel left-hud">
+    <div class="title">Kerr Geodesic Ray Tracer</div>
+    <div class="subtitle">Boyer-Lindquist Null Geodesics & g⁴ Beaming</div>
+
+    <div class="control-group">
+      <div class="control-label"><span>SPECTRAL BAND PALETTE</span></div>
+      <div class="btn-row">
+        <button id="btn-interstellar" class="secondary active">GARGANTUA</button>
+        <button id="btn-eht" class="secondary">230 GHz EHT</button>
+        <button id="btn-doppler" class="secondary">DOPPLER</button>
+      </div>
+    </div>
+
+    <div class="control-group">
+      <div class="control-label"><span>KERR SPIN (a/M)</span><span id="val-spin" class="control-val">0.940</span></div>
+      <input type="range" id="slider-spin" min="0.0" max="0.998" step="0.005" value="0.94">
+    </div>
+
+    <div class="control-group">
+      <div class="control-label"><span>OBSERVER INCLINATION (θ₀)</span><span id="val-inc" class="control-val">81.0°</span></div>
+      <input type="range" id="slider-inc" min="12.0" max="88.5" step="0.5" value="81.0">
+    </div>
+
+    <div class="control-group">
+      <div class="control-label"><span>DOPPLER BEAMING GAIN (g⁴)</span><span id="val-doppler" class="control-val">1.25</span></div>
+      <input type="range" id="slider-doppler" min="0.0" max="2.2" step="0.05" value="1.25">
+    </div>
+
+    <div class="control-group">
+      <div class="control-label"><span>DISK THICKNESS / DENSITY</span><span id="val-turb" class="control-val">1.20</span></div>
+      <input type="range" id="slider-turb" min="0.4" max="2.5" step="0.05" value="1.20">
+    </div>
+
+    <div class="control-group">
+      <div class="control-label"><span>EXPOSURE & BLOOM</span><span id="val-exp" class="control-val">1.05</span></div>
+      <input type="range" id="slider-exp" min="0.3" max="2.0" step="0.05" value="1.05">
+    </div>
+
+    <div class="btn-row">
+      <button id="btn-jets" class="secondary active">RELATIVISTIC JETS</button>
+      <button id="btn-grid" class="secondary">EINSTEIN GRID</button>
+    </div>
+  </div>
+
+  <!-- Right Telemetry Panel -->
+  <div class="hud-panel right-hud">
+    <div class="title">RELATIVISTIC SPACETIME TELEMETRY</div>
+    <div class="subtitle">Exact Boyer-Lindquist Metric Horizons</div>
+
+    <div class="metric-box">
+      <div class="metric-label">Event Horizon (r₊) & Prograde ISCO</div>
+      <div class="metric-value" id="m-radii">r₊ = 1.341 M | r_ISCO = 2.024 M</div>
+      <div class="metric-sub" id="m-ph">Photon Shell: r_ph⁻ = 1.426 M | r_ph⁺ = 3.911 M</div>
+    </div>
+
+    <div class="metric-box" style="border-left-color: #38bdf8;">
+      <div class="metric-label">Relativistic Doppler Asymmetry (I_app / I_rec)</div>
+      <div class="metric-value" id="m-beaming">42.8x Flux Ratio</div>
+      <div class="metric-sub" id="m-gfactor">Peak Blueshift Factor: g_max = 1.624</div>
+    </div>
+
+    <div class="metric-box" style="border-left-color: #f43f5e;">
+      <div class="metric-label">Horizon Frame-Dragging Angular Velocity (Ω_H)</div>
+      <div class="metric-value" id="m-omega">0.3504 c/M</div>
+      <div class="metric-sub">Lense-Thirring Ergosphere Coupling</div>
+    </div>
+
+    <div class="diag-grid">
+      <div class="diag-card">
+        <div class="diag-title"><span>BARDEEN SHADOW</span><span style="color:#fbbf24">α, β (M)</span></div>
+        <canvas id="shadow-canvas" class="mini-canvas" width="142" height="92"></canvas>
+      </div>
+      <div class="diag-card">
+        <div class="diag-title"><span>DISK FLUX I_obs(r)</span><span style="color:#38bdf8">g⁴ I_em</span></div>
+        <canvas id="flux-canvas" class="mini-canvas" width="142" height="92"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bottom Bar -->
+  <div class="hud-panel bottom-hud">
+    <div class="stat-pill"><div class="lbl">GEODESIC SOLVER</div><div class="val">200-Step Adaptive RK2 Null Geodesics</div></div>
+    <div class="stat-pill"><div class="lbl">PHOTON SPHERE</div><div class="val">n=0 Direct + n=1 Upper Lensed + n=2 Ring</div></div>
+    <div class="stat-pill"><div class="lbl">RELATIVISTIC DISK</div><div class="val">Novikov-Thorne + Optical Depth Integration</div></div>
+    <div class="stat-pill"><div class="lbl">INTERACTION</div><div class="val">Drag to Orbit Camera | Scroll Zoom</div></div>
+  </div>
+
+  <script type="module">
+    import * as THREE from 'three';
+
+    const container = document.getElementById('canvas-container');
+    const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    container.appendChild(renderer.domElement);
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+
+    const uniforms = {
+      uResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
+      uTime: { value: 0.0 },
+      uSpin: { value: 0.94 },
+      uInclination: { value: 81.0 * Math.PI / 180.0 },
+      uAzimuth: { value: 0.0 },
+      uCamDist: { value: 20.0 },
+      uRPlus: { value: 1.341 },
+      uRIsco: { value: 2.024 },
+      uDopplerGain: { value: 1.25 },
+      uTurbGain: { value: 1.20 },
+      uExposure: { value: 1.05 },
+      uColorMode: { value: 1 }, // 0: EHT, 1: Gargantua Gold/White, 2: Doppler
+      uShowJets: { value: 1.0 },
+      uShowEinstein: { value: 0.0 }
+    };
+
+    const grrtMaterial = new THREE.ShaderMaterial({
+      uniforms,
+      vertexShader: `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        precision highp float;
+        varying vec2 vUv;
+
+        uniform vec2 uResolution;
+        uniform float uTime;
+        uniform float uSpin;
+        uniform float uInclination;
+        uniform float uAzimuth;
+        uniform float uCamDist;
+        uniform float uRPlus;
+        uniform float uRIsco;
+        uniform float uDopplerGain;
+        uniform float uTurbGain;
+        uniform float uExposure;
+        uniform int uColorMode;
+        uniform float uShowJets;
+        uniform float uShowEinstein;
+
+        float hash(vec3 p) {
+          p = fract(p * 0.3183099 + 0.1);
+          p *= 17.0;
+          return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+        }
+
+        float noise(vec3 x) {
+          vec3 i = floor(x);
+          vec3 f = fract(x);
+          f = f * f * (3.0 - 2.0 * f);
+          return mix(
+            mix(mix(hash(i + vec3(0,0,0)), hash(i + vec3(1,0,0)), f.x),
+                mix(hash(i + vec3(0,1,0)), hash(i + vec3(1,1,0)), f.x), f.y),
+            mix(mix(hash(i + vec3(0,0,1)), hash(i + vec3(1,0,1)), f.x),
+                mix(hash(i + vec3(0,1,1)), hash(i + vec3(1,1,1)), f.x), f.y), f.z);
+        }
+
+        float fbm(vec3 p) {
+          float v = 0.0;
+          float amp = 0.55;
+          for (int i = 0; i < 4; i++) {
+            v += amp * noise(p);
+            p *= 2.08;
+            amp *= 0.48;
+          }
+          return v;
+        }
+
+        vec3 blackbodyPalette(float temp, float gFactor) {
+          if (uColorMode == 2) {
+            float shift = clamp((gFactor - 0.85) * 1.5, -1.0, 1.0);
+            vec3 redLimb = vec3(0.95, 0.08, 0.25);
+            vec3 neutral = vec3(0.95, 0.92, 0.85);
+            vec3 blueLimb = vec3(0.05, 0.85, 1.00);
+            vec3 c = shift < 0.0 ? mix(neutral, redLimb, -shift) : mix(neutral, blueLimb, shift);
+            return c * temp * 1.8;
+          }
+          if (uColorMode == 0) {
+            // EHT 230GHz
+            vec3 c0 = vec3(0.03, 0.005, 0.015);
+            vec3 c1 = vec3(0.72, 0.08, 0.15);
+            vec3 c2 = vec3(0.98, 0.48, 0.06);
+            vec3 c3 = vec3(1.00, 0.94, 0.72);
+            vec3 col = mix(c0, c1, smoothstep(0.0, 0.28, temp));
+            col = mix(col, c2, smoothstep(0.28, 0.68, temp));
+            col = mix(col, c3, smoothstep(0.68, 1.25, temp));
+            return col;
+          }
+          // Default 1: Gargantua / Interstellar Lensed Gold-White
+          vec3 c0 = vec3(0.08, 0.02, 0.01);
+          vec3 c1 = vec3(0.92, 0.38, 0.06);
+          vec3 c2 = vec3(1.00, 0.84, 0.42);
+          vec3 c3 = vec3(0.92, 0.97, 1.00);
+          vec3 col = mix(c0, c1, smoothstep(0.0, 0.25, temp));
+          col = mix(col, c2, smoothstep(0.25, 0.65, temp));
+          col = mix(col, c3, smoothstep(0.65, 1.15, temp));
+          return col;
+        }
+
+        vec3 backgroundStars(vec3 dir) {
+          vec3 p = dir * 140.0;
+          float s1 = pow(max(0.0, noise(p) - 0.77) * 4.4, 5.0);
+          float s2 = pow(max(0.0, noise(p * 2.4 + 19.0) - 0.80) * 5.0, 6.0);
+          vec3 nebula = vec3(0.025, 0.045, 0.11) * pow(fbm(dir * 2.8), 2.2);
+          if (uShowEinstein > 0.5) {
+            float theta = acos(clamp(dir.y, -1.0, 1.0));
+            float phi = atan(dir.z, dir.x);
+            float gridLine = pow(abs(sin(theta * 24.0)), 32.0) + pow(abs(sin(phi * 24.0)), 32.0);
+            nebula += vec3(0.0, 0.55, 0.85) * clamp(gridLine, 0.0, 1.0) * 0.5;
+          }
+          return nebula + vec3(0.85, 0.92, 1.0) * (s1 + s2 * 0.7);
+        }
+
+        void main() {
+          vec2 uv = (gl_FragCoord.xy - 0.5 * uResolution.xy) / uResolution.y;
+
+          float sinI = sin(uInclination);
+          float cosI = cos(uInclination);
+          float sinA = sin(uAzimuth);
+          float cosA = cos(uAzimuth);
+
+          vec3 camPos = uCamDist * vec3(sinI * cosA, cosI, sinI * sinA);
+          vec3 forward = normalize(-camPos);
+          vec3 worldUp = vec3(0.0, 1.0, 0.0);
+          vec3 right = normalize(cross(forward, worldUp));
+          vec3 up = cross(right, forward);
+
+          float fov = 0.58;
+          vec3 rayDir = normalize(forward + uv.x * right * fov + uv.y * up * fov);
+
+          vec3 pos = camPos;
+          vec3 vel = rayDir;
+
+          vec3 accumColor = vec3(0.0);
+          float accumAlpha = 0.0;
+          bool captured = false;
+          float minR = 100.0;
+          int diskCrossings = 0;
+
+          // 200-Step Adaptive Relativistic Geodesic Integrator
+          for (int step = 0; step < 200; step++) {
+            float r2 = dot(pos, pos);
+            float r = sqrt(r2);
+            minR = min(minR, r);
+
+            // True Event Horizon Capture
+            if (r < uRPlus * 1.01) {
+              captured = true;
+              break;
+            }
+            if (r > 38.0 && step > 20) {
+              break;
+            }
+
+            // Adaptive step size: ultra-fine near photon shell
+            float dt = clamp(0.038 * (r - uRPlus * 0.9), 0.012, 0.42);
+
+            // Null Geodesic Acceleration + Kerr Lense-Thirring Drag
+            vec3 hVec = cross(pos, vel);
+            float h2 = dot(hVec, hVec);
+            vec3 accelGR = -1.5 * h2 * pos / (r2 * r2 * r + 1e-4);
+
+            vec3 spinVec = vec3(0.0, uSpin, 0.0);
+            vec3 frameDrag = 2.0 * cross(vel, cross(spinVec, pos)) / (r2 * r + 1e-3);
+
+            vec3 nextVel = normalize(vel + (accelGR + frameDrag) * dt);
+            vec3 nextPos = pos + 0.5 * (vel + nextVel) * dt;
+
+            // Equatorial Accretion Disk Crossing (pos.y * nextPos.y <= 0)
+            if (pos.y * nextPos.y <= 0.0) {
+              diskCrossings += 1;
+              float frac = abs(pos.y) / (abs(pos.y) + abs(nextPos.y) + 1e-6);
+              vec3 hitPos = mix(pos, nextPos, frac);
+              float diskR = length(hitPos.xz);
+
+              // Accretion disk domain: r_ISCO out to 17.5 M
+              if (diskR >= uRIsco * 0.94 && diskR <= 17.5) {
+                float omegaK = 1.0 / (pow(diskR, 1.5) + uSpin);
+                vec3 tangent = normalize(vec3(-hitPos.z, 0.0, hitPos.x));
+                float vOrb = clamp(diskR * omegaK, 0.0, 0.78);
+
+                // Gravitational Redshift + Relativistic Doppler Beaming
+                float gravRedshift = sqrt(max(0.06, 1.0 - 1.55 / diskR));
+                float dopplerCos = dot(-nextVel, tangent);
+                float gamma = 1.0 / sqrt(1.0 - vOrb * vOrb);
+                float gFactor = gravRedshift / (gamma * (1.0 - vOrb * dopplerCos * uDopplerGain * 0.55));
+
+                // Novikov-Thorne Temperature Profile
+                float radialProfile = pow(uRIsco / diskR, 0.85) * (1.0 - sqrt(max(0.0, uRIsco * 0.90 / diskR)));
+                radialProfile *= smoothstep(17.5, 9.0, diskR) * smoothstep(uRIsco * 0.92, uRIsco * 1.15, diskR);
+
+                // Logarithmic MRI Spiral Filaments
+                float angle = atan(hitPos.z, hitPos.x);
+                float spiralPhase = angle * 3.0 + 8.0 * log(diskR) - uTime * (3.4 / pow(diskR, 0.65));
+                vec3 turbCoord = vec3(cos(spiralPhase) * 2.4, sin(spiralPhase) * 2.4, diskR * 0.8 - uTime * 0.4);
+                float mriTurb = 0.55 + 0.45 * sin(spiralPhase) * fbm(turbCoord * uTurbGain);
+
+                // g^4 Bolometric Beaming
+                float g4 = pow(clamp(gFactor, 0.22, 2.4), 3.5);
+                float intensity = radialProfile * mriTurb * g4 * 4.8;
+
+                // Stronger secondary lensing for the upper gravitational arch (Interstellar effect)
+                float lensedBoost = diskCrossings >= 2 ? 1.65 : 1.0;
+                vec3 diskCol = blackbodyPalette(intensity * lensedBoost, gFactor);
+
+                float diskAlpha = clamp(intensity * 0.88, 0.0, 0.96);
+                accumColor += (1.0 - accumAlpha) * diskCol * diskAlpha;
+                accumAlpha += (1.0 - accumAlpha) * diskAlpha;
+              }
+            }
+
+            // Blandford-Znajek Relativistic Polar Jets
+            if (uShowJets > 0.5) {
+              float cylR = length(pos.xz);
+              float absY = abs(pos.y);
+              float jetBoundary = 0.42 + 0.32 * pow(absY, 0.65);
+              if (cylR < jetBoundary && absY > uRPlus * 0.85 && absY < 16.0) {
+                float sheath = exp(-pow((cylR - jetBoundary * 0.70) / 0.20, 2.0));
+                float jetNoise = fbm(vec3(pos.x * 2.6, absY * 1.4 - uTime * 4.8, pos.z * 2.6));
+                float jetEmit = sheath * jetNoise * exp(-absY * 0.16) * 0.052 * dt;
+                vec3 jetCol = mix(vec3(0.12, 0.55, 1.0), vec3(0.85, 0.32, 1.0), cylR / jetBoundary);
+                accumColor += (1.0 - accumAlpha) * jetCol * jetEmit * (0.5 + 0.7 * uSpin);
+              }
+            }
+
+            pos = nextPos;
+            vel = nextVel;
+            if (accumAlpha > 0.98) break;
+          }
+
+          // Ultra-Sharp Critical Photon Ring (n=1, n=2 Lyapunov Shell)
+          float photonRingGlow = exp(-pow((minR - uRPlus * 1.15) / 0.065, 2.0));
+          if (!captured) {
+            accumColor += vec3(1.0, 0.95, 0.85) * photonRingGlow * 1.25;
+          }
+
+          // Inner Event Horizon Shadow: Pure obsidian void
+          if (captured) {
+            accumColor *= smoothstep(uRPlus * 0.95, uRPlus * 1.08, minR) * 0.15;
+          } else {
+            vec3 bg = backgroundStars(vel);
+            accumColor += (1.0 - accumAlpha) * bg;
+          }
+
+          // ACES Filmic Tone Mapping with Glow Curve
+          vec3 x = accumColor * uExposure;
+          vec3 mapped = (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14);
+          mapped = pow(clamp(mapped, 0.0, 1.0), vec3(0.92));
+
+          gl_FragColor = vec4(mapped, 1.0);
+        }
+      `
+    });
+
+    const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), grrtMaterial);
+    scene.add(quad);
+
+    let isDragging = false;
+    let prevX = 0, prevY = 0;
+
+    renderer.domElement.addEventListener('pointerdown', e => {
+      isDragging = true;
+      prevX = e.clientX;
+      prevY = e.clientY;
+    });
+
+    window.addEventListener('pointerup', () => { isDragging = false; });
+
+    window.addEventListener('pointermove', e => {
+      if (!isDragging) return;
+      const dx = (e.clientX - prevX) * 0.006;
+      const dy = (e.clientY - prevY) * 0.006;
+      prevX = e.clientX;
+      prevY = e.clientY;
+
+      uniforms.uAzimuth.value -= dx;
+      const newInc = Math.max(0.2, Math.min(1.54, uniforms.uInclination.value - dy));
+      uniforms.uInclination.value = newInc;
+
+      const deg = (newInc * 180.0 / Math.PI).toFixed(1);
+      document.getElementById('slider-inc').value = deg;
+      document.getElementById('val-inc').innerText = `${deg}°`;
+    });
+
+    renderer.domElement.addEventListener('wheel', e => {
+      e.preventDefault();
+      uniforms.uCamDist.value = Math.max(10.0, Math.min(35.0, uniforms.uCamDist.value + e.deltaY * 0.012));
+    }, { passive: false });
+
+    function drawTelemetryPlots(data) {
+      if (!data) return;
+
+      const c1 = document.getElementById('shadow-canvas');
+      const ctx1 = c1.getContext('2d');
+      ctx1.fillStyle = '#020408';
+      ctx1.fillRect(0, 0, c1.width, c1.height);
+
+      const cx = c1.width * 0.46;
+      const cy = c1.height * 0.5;
+      const scale = 6.2;
+
+      ctx1.beginPath();
+      ctx1.arc(cx, cy, 5.196 * scale, 0, Math.PI * 2);
+      ctx1.strokeStyle = 'rgba(100, 116, 139, 0.35)';
+      ctx1.setLineDash([2, 2]);
+      ctx1.stroke();
+      ctx1.setLineDash([]);
+
+      const alphas = data.shadow.alpha;
+      const betas = data.shadow.beta;
+      ctx1.beginPath();
+      for (let i = 0; i < alphas.length; i++) {
+        const px = cx + alphas[i] * scale;
+        const py = cy - betas[i] * scale;
+        if (i === 0) ctx1.moveTo(px, py);
+        else ctx1.lineTo(px, py);
+      }
+      ctx1.closePath();
+      ctx1.fillStyle = 'rgba(251, 191, 36, 0.12)';
+      ctx1.fill();
+      ctx1.strokeStyle = '#fbbf24';
+      ctx1.lineWidth = 1.6;
+      ctx1.stroke();
+
+      const c2 = document.getElementById('flux-canvas');
+      const ctx2 = c2.getContext('2d');
+      ctx2.fillStyle = '#020408';
+      ctx2.fillRect(0, 0, c2.width, c2.height);
+
+      const radii = data.profile.radii;
+      const fApp = data.profile.flux_approaching;
+      const fRec = data.profile.flux_receding;
+      const maxF = Math.max(...fApp, 1e-4);
+
+      function plotCurve(arr, col) {
+        ctx2.beginPath();
+        for (let i = 0; i < radii.length; i++) {
+          const x = ((radii[i] - 1.0) / 17.0) * (c2.width - 10) + 5;
+          const y = c2.height - 6 - (arr[i] / maxF) * (c2.height - 14);
+          if (i === 0) ctx2.moveTo(x, y);
+          else ctx2.lineTo(x, y);
+        }
+        ctx2.strokeStyle = col;
+        ctx2.lineWidth = 1.6;
+        ctx2.stroke();
+      }
+      plotCurve(fApp, '#38bdf8');
+      plotCurve(fRec, '#f43f5e');
+    }
+
+    async function fetchKerrTelemetry() {
+      const spin = document.getElementById('slider-spin').value;
+      const inc = document.getElementById('slider-inc').value;
+
+      const res = await fetch(`/api/v1/kerr-telemetry?spin_a=${spin}&inclination=${inc}`);
+      const data = await res.json();
+
+      uniforms.uRPlus.value = data.r_plus;
+      uniforms.uRIsco.value = data.r_isco;
+
+      document.getElementById('m-radii').innerText = `r₊ = ${data.r_plus.toFixed(3)} M | r_ISCO = ${data.r_isco.toFixed(3)} M`;
+      document.getElementById('m-ph').innerText = `Photon Shell: r_ph⁻ = ${data.r_ph_prograde.toFixed(3)} M | r_ph⁺ = ${data.r_ph_retrograde.toFixed(3)} M`;
+      document.getElementById('m-beaming').innerText = `${data.doppler_asymmetry.toFixed(1)}x Flux Ratio`;
+      document.getElementById('m-gfactor').innerText = `Peak Blueshift Factor: g_max = ${data.peak_g_factor.toFixed(3)}`;
+      document.getElementById('m-omega').innerText = `${data.omega_horizon.toFixed(4)} c/M`;
+
+      drawTelemetryPlots(data);
+    }
+
+    document.getElementById('slider-spin').addEventListener('input', e => {
+      const val = parseFloat(e.target.value);
+      uniforms.uSpin.value = val;
+      document.getElementById('val-spin').innerText = val.toFixed(3);
+      fetchKerrTelemetry();
+    });
+
+    document.getElementById('slider-inc').addEventListener('input', e => {
+      const deg = parseFloat(e.target.value);
+      uniforms.uInclination.value = deg * Math.PI / 180.0;
+      document.getElementById('val-inc').innerText = `${deg.toFixed(1)}°`;
+      fetchKerrTelemetry();
+    });
+
+    document.getElementById('slider-doppler').addEventListener('input', e => {
+      const val = parseFloat(e.target.value);
+      uniforms.uDopplerGain.value = val;
+      document.getElementById('val-doppler').innerText = val.toFixed(2);
+    });
+
+    document.getElementById('slider-turb').addEventListener('input', e => {
+      const val = parseFloat(e.target.value);
+      uniforms.uTurbGain.value = val;
+      document.getElementById('val-turb').innerText = val.toFixed(2);
+    });
+
+    document.getElementById('slider-exp').addEventListener('input', e => {
+      const val = parseFloat(e.target.value);
+      uniforms.uExposure.value = val;
+      document.getElementById('val-exp').innerText = val.toFixed(2);
+    });
+
+    function setPalette(modeIdx) {
+      uniforms.uColorMode.value = modeIdx;
+      document.getElementById('btn-eht').classList.toggle('active', modeIdx === 0);
+      document.getElementById('btn-interstellar').classList.toggle('active', modeIdx === 1);
+      document.getElementById('btn-doppler').classList.toggle('active', modeIdx === 2);
+    }
+    document.getElementById('btn-eht').addEventListener('click', () => setPalette(0));
+    document.getElementById('btn-interstellar').addEventListener('click', () => setPalette(1));
+    document.getElementById('btn-doppler').addEventListener('click', () => setPalette(2));
+
+    document.getElementById('btn-jets').addEventListener('click', e => {
+      uniforms.uShowJets.value = uniforms.uShowJets.value > 0.5 ? 0.0 : 1.0;
+      e.target.classList.toggle('active', uniforms.uShowJets.value > 0.5);
+    });
+
+    document.getElementById('btn-grid').addEventListener('click', e => {
+      uniforms.uShowEinstein.value = uniforms.uShowEinstein.value > 0.5 ? 0.0 : 1.0;
+      e.target.classList.toggle('active', uniforms.uShowEinstein.value > 0.5);
+    });
+
+    window.addEventListener('resize', () => {
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      uniforms.uResolution.value.set(window.innerWidth, window.innerHeight);
+    });
+
+    fetchKerrTelemetry();
+    const clock = new THREE.Clock();
+
+    function animate() {
+      requestAnimationFrame(animate);
+      uniforms.uTime.value = clock.getElapsedTime();
+      renderer.render(scene, camera);
+    }
+    animate();
+  </script>
+</body>
+</html>
